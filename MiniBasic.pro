@@ -11,11 +11,15 @@ CONFIG += c++11
 SOURCES += \
     expression.cpp \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    parser.cpp \
+    tokenizer.cpp
 
 HEADERS += \
     expression.h \
-    mainwindow.h
+    mainwindow.h \
+    parser.h \
+    tokenizer.h
 
 FORMS += \
     mainwindow.ui

@@ -1,5 +1,7 @@
 #include "mainwindow.h"
 #include "expression.h"
+#include "tokenizer.h"
+#include "parser.h"
 #include "ui_mainwindow.h"
 #include <QFileDialog> // 用于打开文件
 #include <QTextStream>
@@ -74,37 +76,6 @@ void MainWindow::on_cmdLineEdit_editingFinished()
             ui->textBrowser->append("Error: Unknown command or immediate execution not implemented yet.");
         }
     }
-    if (cmd == "TEST_EXP") {
-        try {
-            // 创建上下文：设 A = 10, B = 3
-            EvaluationContext ctx;
-            ctx.setValue("A", 10);
-            ctx.setValue("B", 3);
-
-            // 手动构建表达式树： A + B * 5
-            // 注意：这棵树对应 (B * 5) + A，即 3*5 + 10 = 25
-            Expression *e1 = new ConstantExp(5);
-            Expression *e2 = new IdentifierExp("B");
-            Expression *e3 = new CompoundExp("*", e2, e1); // B * 5
-            Expression *e4 = new IdentifierExp("A");
-            Expression *root = new CompoundExp("+", e4, e3); // A + (B * 5)
-
-            int result = root->eval(ctx);
-            ui->textBrowser->append("Exp: A + B * 5 (A=10, B=3)");
-            ui->textBrowser->append("Result: " + QString::number(result));
-
-            // 必须手动释放根节点，触发递归删除
-            delete root;
-        } catch (std::exception &e) {
-            ui->textBrowser->append(QString("Error: ") + e.what());
-        }
-        ui->textBrowser->append("Error: Unknown command...");
-
-        return;
-    }
-    // ============================================
-
-
 }
 
 // 辅助函数：遍历 map 更新 UI
