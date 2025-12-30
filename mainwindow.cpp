@@ -3,6 +3,7 @@
 #include "tokenizer.h"
 #include "parser.h"
 #include "ui_mainwindow.h"
+#include "statement.h"
 #include <QFileDialog> // 用于打开文件
 #include <QTextStream>
 #include <QMessageBox>
@@ -13,6 +14,10 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+    // 【新增】初始化 Context 的 UI 接口
+    // 这样无论是 RUN 还是立即执行，PRINT 都能打印到窗口上
+    globalContext.setUI(ui->textBrowser, this);
+
     //注意不要重复链接，已经自动链接了。
 }
 
@@ -133,4 +138,93 @@ void MainWindow::on_btnLoadCode_clicked()
 
     refreshCodeDisplay();
     ui->textBrowser->append("Loaded: " + fileName);
+}
+// Run 按钮的槽函数
+void MainWindow::on_btnRunCode_clicked()
+{
+    ui->treeDisplay->clear();
+    ui->textBrowser->clear();
+
+    if (programCode.empty()) return;
+
+    // === 1. 解析阶段 (Parsing Phase) ===
+    // 我们需要把所有代码先解析成 Statement 对象，存储起来方便跳转
+    std::map<int, Statement*> statementMap;
+    EvaluationContext context;
+    context.setUI(ui->textBrowser, this); // 把 UI 传给 Context
+
+    try {
+        for (auto it = programCode.begin(); it != programCode.end(); ++it) {
+            int lineNum = it->first;
+            QString code = it->second;
+
+            // 调用 Parser
+            Parser parser(code.toStdString());
+            Statement *stmt = parser.parseStatement();
+
+            // 存入 map
+            statementMap[lineNum] = stmt;
+
+            // 显示语法树
+            // 1. 获取缩进为 0 的树字符串
+            std::string treeStrStd = stmt->toString(0);
+            QString treeStr = QString::fromStdString(treeStrStd);
+
+            // 2. 去掉末尾可能多余的换行符 (防止 append 多次换行)
+            if (treeStr.endsWith('\n')) treeStr.chop(1);
+
+            // 3. 拼接 "行号" + "空格" + "树结构"
+            // 结果类似: "100 REM" 或 "110 LET ="
+            ui->treeDisplay->append(QString::number(lineNum) + " " + treeStr);
+        }
+    } catch (std::exception &e) {
+        ui->textBrowser->append("Syntax Error: " + QString::fromStdString(e.what()));
+        // 如果解析出错，记得释放已经创建的语句内存
+        for (auto pair : statementMap) delete pair.second;
+        return;
+    }
+
+    // === 2. 执行阶段 (Execution Phase) ===
+    try {
+        // 从第一行开始
+        auto it = statementMap.begin();
+
+        while (it != statementMap.end()) {
+            Statement *currentStmt = it->second;
+
+            try {
+                // 执行语句
+                currentStmt->execute(context);
+
+                // 正常执行完，移动到下一行
+                it++;
+            }
+            catch (GotoSignal &gotoSig) {
+                // 捕获 GOTO 信号
+                int targetLine = gotoSig.targetLine;
+
+                // 在 map 中查找目标行
+                auto targetIt = statementMap.find(targetLine);
+                if (targetIt == statementMap.end()) {
+                    throw std::runtime_error("Line number not found: " + std::to_string(targetLine));
+                }
+
+                // 跳转迭代器
+                it = targetIt;
+            }
+        }
+    }
+    catch (EndSignal &endSig) {
+        // 正常结束 (END 语句)
+        // ui->textBrowser->append("--- Program Ended ---");
+    }
+    catch (std::exception &e) {
+        // 运行时错误 (如除以0，变量未定义)
+        ui->textBrowser->append("Runtime Error: " + QString::fromStdString(e.what()));
+    }
+
+    // === 3. 清理内存 ===
+    for (auto pair : statementMap) {
+        delete pair.second;
+    }
 }

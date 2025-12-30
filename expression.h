@@ -5,17 +5,46 @@
 #include <map>
 #include <stdexcept>
 
+// 【新增】引入 Qt 头文件，以便操作 UI
+#include <QTextBrowser>
+#include <QInputDialog>
+
 // === 1. 上下文环境 (Context) ===
-// 用来存储变量的值，比如 A=10, B=20
 class EvaluationContext {
 public:
+    // 【新增】设置 UI 组件的指针，在 RUN 开始前调用
+    void setUI(QTextBrowser *out, QWidget *parentWidget) {
+        outputBrowser = out;
+        inputParent = parentWidget;
+    }
+
     void setValue(std::string var, int value);
     int getValue(std::string var);
     bool isDefined(std::string var);
-    void clear(); // 清空所有变量
+    void clear();
+
+    // 【新增】输出函数 (供 PrintStmt 调用)
+    void writeOutput(std::string msg) {
+        if (outputBrowser) outputBrowser->append(QString::fromStdString(msg));
+    }
+
+    // 【新增】输入函数 (供 InputStmt 调用)
+    // 阻塞式弹窗获取输入
+    int readInput(std::string varName) {
+        bool ok;
+        int val = QInputDialog::getInt(inputParent, "INPUT Request",
+                                       QString::fromStdString("Value for " + varName + "?"),
+                                       0, -2147483647, 2147483647, 1, &ok);
+        if (!ok) throw std::runtime_error("Input canceled");
+        return val;
+    }
 
 private:
     std::map<std::string, int> symbolTable;
+
+    // 【新增】UI 指针
+    QTextBrowser *outputBrowser = nullptr;
+    QWidget *inputParent = nullptr;
 };
 
 // === 2. 表达式基类 (Expression) ===
@@ -33,7 +62,7 @@ public:
     // 核心功能：生成语法树的字符串显示（用于 UI 显示）
     // indent: 缩进层级
     // 比如 CompoundExp 需要先打印 "+" 然后递归打印左右子树
-    virtual std::string toString() = 0;
+    virtual std::string toString(int indent = 0) = 0;
 
     virtual ExpressionType type() = 0;
 
@@ -52,7 +81,7 @@ public:
     ConstantExp(int val);
 
     virtual int eval(EvaluationContext &context) override;
-    virtual std::string toString() override;
+    virtual std::string toString(int indent = 0) override;
     virtual ExpressionType type() override;
     virtual int getConstantValue() override;
 
@@ -66,7 +95,7 @@ public:
     IdentifierExp(std::string name);
 
     virtual int eval(EvaluationContext &context) override;
-    virtual std::string toString() override;
+    virtual std::string toString(int indent = 0) override;
     virtual ExpressionType type() override;
     virtual std::string getIdentifierName() override;
 
@@ -81,7 +110,7 @@ public:
     virtual ~CompoundExp();
 
     virtual int eval(EvaluationContext &context) override;
-    virtual std::string toString() override;
+    virtual std::string toString(int indent = 0) override;
     virtual ExpressionType type() override;
     virtual std::string getOperator() override;
     virtual Expression *getLHS() override;

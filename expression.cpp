@@ -2,6 +2,12 @@
 #include <cmath>    // std::pow
 #include <string>
 #include <stdexcept> // std::runtime_error
+#include <sstream>
+
+// 生成 n 个空格
+static std::string indentStr(int n) {
+    return std::string(n, ' ');
+}
 
 // ==========================================================
 // EvaluationContext (变量上下文) 实现
@@ -49,8 +55,9 @@ int ConstantExp::eval(EvaluationContext &context) {
     return value;
 }
 
-std::string ConstantExp::toString() {
-    return std::to_string(value);
+std::string ConstantExp::toString(int indent) {
+    // 缩进 + 数值 + 换行
+    return indentStr(indent) + std::to_string(value) + "\n";
 }
 
 ExpressionType ConstantExp::type() {
@@ -76,8 +83,9 @@ int IdentifierExp::eval(EvaluationContext &context) {
     return context.getValue(name);
 }
 
-std::string IdentifierExp::toString() {
-    return name;
+std::string IdentifierExp::toString(int indent) {
+    // 缩进 + 变量名 + 换行
+    return indentStr(indent) + name + "\n";
 }
 
 ExpressionType IdentifierExp::type() {
@@ -130,9 +138,15 @@ int CompoundExp::eval(EvaluationContext &context) {
     throw std::runtime_error("Illegal operator: " + op);
 }
 
-std::string CompoundExp::toString() {
-    // 这里仅返回操作符，因为树形结构的缩进显示将在上层逻辑中处理
-    return op;
+std::string CompoundExp::toString(int indent) {
+    std::string str;
+    // 1. 打印操作符 (根)
+    str += indentStr(indent) + op + "\n";
+    // 2. 递归打印左子树 (缩进 + 4)
+    str += lhs->toString(indent + 4);
+    // 3. 递归打印右子树 (缩进 + 4)
+    str += rhs->toString(indent + 4);
+    return str;
 }
 
 ExpressionType CompoundExp::type() {

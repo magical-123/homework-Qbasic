@@ -13,12 +13,14 @@ SOURCES += \
     main.cpp \
     mainwindow.cpp \
     parser.cpp \
+    statement.cpp \
     tokenizer.cpp
 
 HEADERS += \
     expression.h \
     mainwindow.h \
     parser.h \
+    statement.h \
     tokenizer.h
 
 FORMS += \

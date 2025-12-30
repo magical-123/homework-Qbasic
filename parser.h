@@ -3,6 +3,7 @@
 
 #include "expression.h"
 #include "tokenizer.h"
+#include "statement.h"
 #include <string>
 
 class Parser {
@@ -13,6 +14,7 @@ public:
     // 主入口：解析并返回表达式树的根节点
     // 调用者负责 delete 返回的指针
     Expression* parseExpression();
+    Statement* parseStatement();
 
 private:
     Tokenizer *tokenizer; // 词法分析器实例
