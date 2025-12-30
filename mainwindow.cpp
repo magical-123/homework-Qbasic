@@ -14,11 +14,12 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
-    // 【新增】初始化 Context 的 UI 接口
-    // 这样无论是 RUN 还是立即执行，PRINT 都能打印到窗口上
-    globalContext.setUI(ui->textBrowser, this);
 
-    //注意不要重复链接，已经自动链接了。
+    // 【核心改动】配置 Context，注入输入逻辑
+    // 使用 lambda 表达式包裹我们的 handleInputFromCommandLine
+    globalContext.setUI(ui->textBrowser, [this]() -> int {
+        return this->handleInputFromCommandLine();
+    });
 }
 
 MainWindow::~MainWindow()
@@ -26,63 +27,86 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
-// 核心逻辑：处理用户输入
+// =========================================================
+// 2. 命令行输入处理逻辑 (包含立即执行)
+// =========================================================
 void MainWindow::on_cmdLineEdit_editingFinished()
 {
-    QString cmd = ui->cmdLineEdit->text().trimmed(); // 去除首尾空格
+    QString cmd = ui->cmdLineEdit->text().trimmed();
     ui->cmdLineEdit->setText(""); // 清空输入框
 
     if (cmd.isEmpty()) return;
 
-    // 在结果窗口回显用户的输入（模拟终端风格）
-    // ui->textBrowser->append(cmd); // 如果不想回显可以注释掉这行
-
-    // 1. 尝试读取行号
+    // 尝试解析行号
     bool isNumber;
-    // 获取第一个单词，看看是不是数字
     QString firstToken = cmd.section(' ', 0, 0);
     int lineNumber = firstToken.toInt(&isNumber);
 
     if (isNumber) {
-        // === 情况 A: 用户输入了行号 (例如 "10 LET A = 1") ===
-
-        // 获取行号后面的内容
-        // mid(firstToken.length()) 截取掉行号，trimmed() 去掉剩下的前导空格
+        // === 情况 A: 编辑代码行 (有行号) ===
+        // 格式: 10 LET A = 1
         QString codeContent = cmd.mid(firstToken.length()).trimmed();
 
         if (codeContent.isEmpty()) {
-            // 如果只输入了行号 (例如 "10") -> 删除该行
+            // 输入 "10" -> 删除第10行
             programCode.erase(lineNumber);
         } else {
-            // 否则 -> 插入或更新该行
+            // 输入 "10 ..." -> 插入或更新
             programCode[lineNumber] = codeContent;
         }
-
-        // 数据变了，刷新显示
         refreshCodeDisplay();
-
-    } else {
-        // === 情况 B: 用户输入的是命令 (例如 "RUN", "LOAD") ===
-
-        if (cmd.compare("LOAD", Qt::CaseInsensitive) == 0) {
+    }
+    else {
+        // === 情况 B: 系统命令 (无行号) ===
+        if (cmd.compare("RUN", Qt::CaseInsensitive) == 0) {
+            on_btnRunCode_clicked();
+            return;
+        }
+        else if (cmd.compare("LOAD", Qt::CaseInsensitive) == 0) {
             on_btnLoadCode_clicked();
+            return;
         }
         else if (cmd.compare("CLEAR", Qt::CaseInsensitive) == 0) {
             on_btnClearCode_clicked();
+            return;
         }
         else if (cmd.compare("QUIT", Qt::CaseInsensitive) == 0) {
             QApplication::quit();
+            return;
         }
         else if (cmd.compare("HELP", Qt::CaseInsensitive) == 0) {
-            ui->textBrowser->append("QBasic Interpreter Help:\nType line numbers to add code.\nType RUN to execute.");
+            ui->textBrowser->append("Help:\n- Type 'LineNumber Code' to edit.\n- Type 'RUN/LOAD/CLEAR/QUIT' to control.\n- Type 'PRINT/LET/INPUT ...' to execute immediately.");
+            return;
         }
-        else {
-            // 暂时不处理其他立即执行的语句（如 PRINT 1+1），留给后续阶段
-            ui->textBrowser->append("Error: Unknown command or immediate execution not implemented yet.");
+
+        // === 情况 C: 立即执行语句 (Immediate Execution) ===
+        // 没有行号，也不是命令，尝试当作语句执行
+        try {
+            Parser parser(cmd.toStdString());
+            Statement *stmt = parser.parseStatement();
+
+            // 检查是否允许立即执行
+            // 题目要求：LET, PRINT, INPUT 可以立即执行
+            // GOTO, IF, REM, END 必须有行号
+            if (dynamic_cast<LetStmt*>(stmt) ||
+                dynamic_cast<PrintStmt*>(stmt) ||
+                dynamic_cast<InputStmt*>(stmt)) {
+
+                // 执行 (使用 globalContext)
+                stmt->execute(globalContext);
+            }
+            else {
+                ui->textBrowser->append("Error: This statement requires a line number.");
+            }
+
+            delete stmt; // 用完即删
+        }
+        catch (std::exception &e) {
+            // 解析失败，说明不是合法的 Basic 语句，也不是命令
+            ui->textBrowser->append("Error: Unknown command or syntax error.");
         }
     }
 }
-
 // 辅助函数：遍历 map 更新 UI
 void MainWindow::refreshCodeDisplay()
 {
@@ -102,6 +126,9 @@ void MainWindow::on_btnClearCode_clicked()
     ui->CodeDisplay->clear();
     ui->textBrowser->clear();
     ui->treeDisplay->clear();
+
+    // 【新增】只有点击 CLEAR 时才清空变量表
+    globalContext.clear();
 }
 
 // 实现 LOAD 功能
@@ -139,92 +166,136 @@ void MainWindow::on_btnLoadCode_clicked()
     refreshCodeDisplay();
     ui->textBrowser->append("Loaded: " + fileName);
 }
-// Run 按钮的槽函数
+
+//RUN
 void MainWindow::on_btnRunCode_clicked()
 {
+    // 1. 清理 UI
     ui->treeDisplay->clear();
     ui->textBrowser->clear();
 
     if (programCode.empty()) return;
+    //2.不再重置变量表
 
-    // === 1. 解析阶段 (Parsing Phase) ===
-    // 我们需要把所有代码先解析成 Statement 对象，存储起来方便跳转
+    // 3. 解析阶段 (Parsing Phase)
+    // 将代码文本转换为 Statement 对象，并显示语法树
     std::map<int, Statement*> statementMap;
-    EvaluationContext context;
-    context.setUI(ui->textBrowser, this); // 把 UI 传给 Context
 
     try {
         for (auto it = programCode.begin(); it != programCode.end(); ++it) {
             int lineNum = it->first;
-            QString code = it->second;
+            QString codeStr = it->second;
 
-            // 调用 Parser
-            Parser parser(code.toStdString());
+            // 调用 Parser 解析当前行
+            Parser parser(codeStr.toStdString());
             Statement *stmt = parser.parseStatement();
-
-            // 存入 map
             statementMap[lineNum] = stmt;
 
-            // 显示语法树
-            // 1. 获取缩进为 0 的树字符串
-            std::string treeStrStd = stmt->toString(0);
-            QString treeStr = QString::fromStdString(treeStrStd);
+            // === 语法树显示逻辑 (修复版) ===
+            // 目标格式: "100 REM ..." (根节点在行号后面，子节点换行缩进)
 
-            // 2. 去掉末尾可能多余的换行符 (防止 append 多次换行)
+            // 获取缩进为0的字符串 (例如 "REM\n    Comment...")
+            std::string rawTree = stmt->toString(0);
+            QString treeStr = QString::fromStdString(rawTree);
+
+            // 去掉末尾可能多余的换行符
             if (treeStr.endsWith('\n')) treeStr.chop(1);
 
-            // 3. 拼接 "行号" + "空格" + "树结构"
-            // 结果类似: "100 REM" 或 "110 LET ="
+            // 拼接到 treeDisplay
             ui->treeDisplay->append(QString::number(lineNum) + " " + treeStr);
         }
-    } catch (std::exception &e) {
+    }
+    catch (std::exception &e) {
         ui->textBrowser->append("Syntax Error: " + QString::fromStdString(e.what()));
-        // 如果解析出错，记得释放已经创建的语句内存
+        // 解析失败，清理已分配的内存
         for (auto pair : statementMap) delete pair.second;
         return;
     }
 
-    // === 2. 执行阶段 (Execution Phase) ===
+    // 4. 执行阶段 (Execution Phase)
     try {
-        // 从第一行开始
         auto it = statementMap.begin();
-
         while (it != statementMap.end()) {
             Statement *currentStmt = it->second;
 
             try {
                 // 执行语句
-                currentStmt->execute(context);
+                currentStmt->execute(globalContext);
 
-                // 正常执行完，移动到下一行
+                // 正常执行下一行
                 it++;
             }
-            catch (GotoSignal &gotoSig) {
-                // 捕获 GOTO 信号
-                int targetLine = gotoSig.targetLine;
-
-                // 在 map 中查找目标行
-                auto targetIt = statementMap.find(targetLine);
+            catch (GotoSignal &sig) {
+                // 捕获 GOTO 信号，查找目标行
+                auto targetIt = statementMap.find(sig.targetLine);
                 if (targetIt == statementMap.end()) {
-                    throw std::runtime_error("Line number not found: " + std::to_string(targetLine));
+                    throw std::runtime_error("Line number not found: " + std::to_string(sig.targetLine));
                 }
-
-                // 跳转迭代器
-                it = targetIt;
+                it = targetIt; // 跳转迭代器
             }
         }
     }
-    catch (EndSignal &endSig) {
-        // 正常结束 (END 语句)
+    catch (EndSignal &) {
+        // 捕获 END 信号，正常退出循环
         // ui->textBrowser->append("--- Program Ended ---");
     }
     catch (std::exception &e) {
-        // 运行时错误 (如除以0，变量未定义)
+        // 捕获运行时错误 (如除以0)
         ui->textBrowser->append("Runtime Error: " + QString::fromStdString(e.what()));
     }
 
-    // === 3. 清理内存 ===
+    // 5. 内存清理
     for (auto pair : statementMap) {
         delete pair.second;
     }
+}
+
+// 【新增】黑科技：命令行原地输入处理
+int MainWindow::handleInputFromCommandLine()
+{
+    // 1. 准备界面
+    ui->textBrowser->append(" ? ");
+    ui->cmdLineEdit->setFocus();
+
+    // 2. 暂时断开主逻辑连接 (防止冲突)
+    // 使用 0, 0 可以断开该信号的所有连接，更彻底
+    ui->cmdLineEdit->disconnect(SIGNAL(editingFinished()));
+
+    // 3. 准备抓取变量
+    QString capturedText;
+    QEventLoop loop;
+
+    // 4. 建立临时的连接
+    // 逻辑：当按下回车时 -> 1.马上保存文本 -> 2.退出循环
+    // 注意：这里使用了 C++11 Lambda 表达式，[&] 表示引用捕获外部变量
+    auto conn = connect(ui->cmdLineEdit, &QLineEdit::returnPressed, [&](){
+        capturedText = ui->cmdLineEdit->text().trimmed(); // 【关键】立刻抓取！
+        loop.quit();
+    });
+
+    // 5. 阻塞等待
+    loop.exec();
+
+    // 6. 清理现场
+    // 断开刚才建立的临时 lambda 连接
+    disconnect(conn);
+
+    // 清空输入框 (此时文本已经被 capturedText 保存了，可以放心清空)
+    ui->cmdLineEdit->clear();
+
+    // 回显
+    ui->textBrowser->append(capturedText);
+
+    // 7. 恢复主逻辑连接
+    connect(ui->cmdLineEdit, &QLineEdit::editingFinished, this, &MainWindow::on_cmdLineEdit_editingFinished);
+
+    // 8. 转换并返回
+    bool ok;
+    int val = capturedText.toInt(&ok);
+
+    // 如果想要更友好的调试信息：
+    // ui->textBrowser->append("[Debug] Captured: '" + capturedText + "' -> Int: " + QString::number(val));
+
+    if (!ok) return 0;
+    return val;
 }

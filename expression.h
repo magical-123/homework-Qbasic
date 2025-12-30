@@ -4,18 +4,24 @@
 #include <string>
 #include <map>
 #include <stdexcept>
+#include <functional> // 【新增】用于 std::function
 
 // 【新增】引入 Qt 头文件，以便操作 UI
 #include <QTextBrowser>
 #include <QInputDialog>
 
-// === 1. 上下文环境 (Context) ===
+
+//变量表
 class EvaluationContext {
 public:
-    // 【新增】设置 UI 组件的指针，在 RUN 开始前调用
-    void setUI(QTextBrowser *out, QWidget *parentWidget) {
+    // 定义一个函数类型，用于读取输入
+    // 它不接收参数，返回一个 int
+    using InputHandler = std::function<int()>;
+
+    // 设置 UI 和 输入处理器
+    void setUI(QTextBrowser *out, InputHandler handler) {
         outputBrowser = out;
-        inputParent = parentWidget;
+        inputHandler = handler; // 保存这个“锦囊”函数
     }
 
     void setValue(std::string var, int value);
@@ -23,30 +29,22 @@ public:
     bool isDefined(std::string var);
     void clear();
 
-    // 【新增】输出函数 (供 PrintStmt 调用)
     void writeOutput(std::string msg) {
         if (outputBrowser) outputBrowser->append(QString::fromStdString(msg));
     }
 
-    // 【新增】输入函数 (供 InputStmt 调用)
-    // 阻塞式弹窗获取输入
+    // 【修改】现在的 readInput 变得非常简单，它只负责调用“锦囊”
     int readInput(std::string varName) {
-        bool ok;
-        int val = QInputDialog::getInt(inputParent, "INPUT Request",
-                                       QString::fromStdString("Value for " + varName + "?"),
-                                       0, -2147483647, 2147483647, 1, &ok);
-        if (!ok) throw std::runtime_error("Input canceled");
-        return val;
+        if (!inputHandler) throw std::runtime_error("No input handler defined");
+        // 这里会调用 MainWindow 里的那个复杂逻辑，并阻塞直到用户输入完毕
+        return inputHandler();
     }
 
 private:
     std::map<std::string, int> symbolTable;
-
-    // 【新增】UI 指针
     QTextBrowser *outputBrowser = nullptr;
-    QWidget *inputParent = nullptr;
+    InputHandler inputHandler = nullptr; // 【新增】存储外部传入的输入逻辑
 };
-
 // === 2. 表达式基类 (Expression) ===
 // 所有的表达式节点（数字、变量、运算）都继承自它
 enum ExpressionType { CONSTANT, IDENTIFIER, COMPOUND };

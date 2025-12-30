@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <map>  // 【新增】用于存储代码
 #include "expression.h"
+#include <QEventLoop>
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -37,5 +38,8 @@ private:
 
     // 【新增】辅助函数：将 map 中的代码刷新显示到 CodeDisplay
     void refreshCodeDisplay();
+    // 【新增】辅助函数：处理 INPUT 阻塞等待
+    int handleInputFromCommandLine();
+
 };
 #endif // MAINWINDOW_H

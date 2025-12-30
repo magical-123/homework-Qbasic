@@ -65,9 +65,16 @@ std::string EndStmt::toString(int indent) {
 // === InputStmt ===
 InputStmt::InputStmt(std::string varName) : name(varName) {}
 void InputStmt::execute(EvaluationContext &context) {
-    // 调用 Context 的输入能力，并保存变量
+    // 1. 读取输入
     int val = context.readInput(name);
+
+    // 2. 存入变量
     context.setValue(name, val);
+
+    // 【新增】调试信息 (调试完可以注释掉)
+    // 这样你就能看到到底发生了什么
+    // 使用 context.writeOutput 打印到屏幕，或者 qDebug() 打印到后台
+    //context.writeOutput("[Debug] INPUT " + name + " got value: " + std::to_string(val));
 }
 std::string InputStmt::toString(int indent) {
     return indentStr(indent) + "INPUT\n" + indentStr(indent + 4) + name;
